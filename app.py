@@ -34,87 +34,66 @@ GOOGLE_DRIVE_FOLDER_URL = "https://drive.google.com/drive/folders/1Hp2pF1OtUazdG
 MODEL_FOLDER_NAME = "lulc_2_epoch"
 TEMP_MODEL_PATH = f"./temp_{MODEL_FOLDER_NAME}"
 
-# ===== UTILITY FUNCTIONS =====
 @st.cache_resource
 def download_and_load_model_from_gdrive():
     """Download model directly from Google Drive and load it."""
     try:
-        # Clean up any existing temp files
+        # Close any previous TF sessions before deleting old temp folder
+        tf.keras.backend.clear_session()
+
         if os.path.exists(TEMP_MODEL_PATH):
-            shutil.rmtree(TEMP_MODEL_PATH)
-        
+            try:
+                shutil.rmtree(TEMP_MODEL_PATH)
+            except PermissionError:
+                # Ignore locked files (Windows/OneDrive issue)
+                print(f"[WARNING] Could not delete some files in {TEMP_MODEL_PATH}, skipping locked files...")
+                shutil.rmtree(TEMP_MODEL_PATH, ignore_errors=True)
+
         with st.status("📥 Loading model from Google Drive...", expanded=True) as status:
             st.write("🔗 Connecting to Google Drive...")
             time.sleep(0.5)
-            
             st.write("⬇️ Downloading model files...")
-            
-            # Download the folder directly from Google Drive
-            try:
-                gdown.download_folder(
-                    url=GOOGLE_DRIVE_FOLDER_URL,
-                    output=TEMP_MODEL_PATH,
-                    quiet=False,
-                    use_cookies=False
-                )
-                
-                # Find the model path
-                model_path = None
-                if os.path.exists(TEMP_MODEL_PATH):
-                    # Check if the model folder is directly in temp
-                    if os.path.exists(os.path.join(TEMP_MODEL_PATH, MODEL_FOLDER_NAME)):
-                        model_path = os.path.join(TEMP_MODEL_PATH, MODEL_FOLDER_NAME)
-                    # Or if the model files are directly in temp
-                    elif any(f.endswith('.pb') or f == 'saved_model.pb' for f in os.listdir(TEMP_MODEL_PATH)):
-                        model_path = TEMP_MODEL_PATH
-                    # Or check for subdirectories
-                    else:
-                        for item in os.listdir(TEMP_MODEL_PATH):
-                            item_path = os.path.join(TEMP_MODEL_PATH, item)
-                            if os.path.isdir(item_path):
-                                if any(f.endswith('.pb') or f == 'saved_model.pb' for f in os.listdir(item_path)):
-                                    model_path = item_path
-                                    break
-                
-                if not model_path:
-                    raise Exception("Could not locate TensorFlow model files in downloaded folder")
-                
-                st.write("🧠 Loading TensorFlow model...")
-                
-                # Load the model with TensorFlow 2.20.0
-                model = tf.keras.models.load_model(model_path, compile=False)
-                
-                st.write("✅ Model loaded successfully!")
-                status.update(label="✅ Model ready from Google Drive!", state="complete", expanded=False)
-                
-                return model, None
-                
-            except Exception as download_error:
-                raise Exception(f"Failed to download from Google Drive: {str(download_error)}")
-                
+
+            # Download from Google Drive
+            gdown.download_folder(
+                url=GOOGLE_DRIVE_FOLDER_URL,
+                output=TEMP_MODEL_PATH,
+                quiet=False,
+                use_cookies=False
+            )
+
+            # Detect model path
+            model_path = None
+            if os.path.exists(os.path.join(TEMP_MODEL_PATH, MODEL_FOLDER_NAME)):
+                model_path = os.path.join(TEMP_MODEL_PATH, MODEL_FOLDER_NAME)
+            elif any(f.endswith('.pb') or f == 'saved_model.pb' for f in os.listdir(TEMP_MODEL_PATH)):
+                model_path = TEMP_MODEL_PATH
+            else:
+                for item in os.listdir(TEMP_MODEL_PATH):
+                    item_path = os.path.join(TEMP_MODEL_PATH, item)
+                    if os.path.isdir(item_path) and any(
+                        f.endswith('.pb') or f == 'saved_model.pb' for f in os.listdir(item_path)
+                    ):
+                        model_path = item_path
+                        break
+
+            if not model_path:
+                raise Exception("Could not locate TensorFlow model files in downloaded folder")
+
+            st.write("🧠 Loading TensorFlow model...")
+            model = tf.keras.models.load_model(model_path, compile=False)
+            st.write("✅ Model loaded successfully!")
+            status.update(label="✅ Model ready from Google Drive!", state="complete", expanded=False)
+
+            return model, None
+
     except Exception as e:
-        # Clean up on error
+        # Cleanup on error
+        tf.keras.backend.clear_session()
         if os.path.exists(TEMP_MODEL_PATH):
-            shutil.rmtree(TEMP_MODEL_PATH)
+            shutil.rmtree(TEMP_MODEL_PATH, ignore_errors=True)
         return None, f"❌ Model loading failed: {str(e)}"
 
-def preprocess_image(image: Image.Image):
-    """Preprocess the uploaded image for model prediction."""
-    try:
-        # Convert to RGB if needed (PIL 11.3.0 compatible)
-        if image.mode != 'RGB':
-            image = image.convert('RGB')
-        
-        # Resize image
-        image = image.resize((IMG_WIDTH, IMG_HEIGHT), Image.LANCZOS)
-        
-        # Convert to numpy array (compatible with numpy>=1.26.0)
-        img_array = np.array(image, dtype=np.float32) * RESCALE_FACTOR
-        img_array = np.expand_dims(img_array, axis=0)
-        
-        return img_array, None
-    except Exception as e:
-        return None, f"Error preprocessing image: {str(e)}"
 
 def get_top_predictions(predictions, top_k=3):
     """Get top K predictions with confidence scores."""
