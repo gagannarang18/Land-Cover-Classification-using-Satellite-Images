@@ -34,6 +34,7 @@ GOOGLE_DRIVE_FOLDER_URL = "https://drive.google.com/drive/folders/1Hp2pF1OtUazdG
 MODEL_FOLDER_NAME = "lulc_2_epoch"
 TEMP_MODEL_PATH = f"./temp_{MODEL_FOLDER_NAME}"
 
+# ===== UTILITY FUNCTIONS =====
 @st.cache_resource
 def download_and_load_model_from_gdrive():
     """Download model directly from Google Drive and load it."""
@@ -94,6 +95,24 @@ def download_and_load_model_from_gdrive():
             shutil.rmtree(TEMP_MODEL_PATH, ignore_errors=True)
         return None, f"❌ Model loading failed: {str(e)}"
 
+
+def preprocess_image(image: Image.Image):
+    """Preprocess the uploaded image for model prediction."""
+    try:
+        # Convert to RGB if needed (PIL 11.3.0 compatible)
+        if image.mode != 'RGB':
+            image = image.convert('RGB')
+        
+        # Resize image
+        image = image.resize((IMG_WIDTH, IMG_HEIGHT), Image.LANCZOS)
+        
+        # Convert to numpy array (compatible with numpy>=1.26.0)
+        img_array = np.array(image, dtype=np.float32) * RESCALE_FACTOR
+        img_array = np.expand_dims(img_array, axis=0)
+        
+        return img_array, None
+    except Exception as e:
+        return None, f"Error preprocessing image: {str(e)}"
 
 def get_top_predictions(predictions, top_k=3):
     """Get top K predictions with confidence scores."""
